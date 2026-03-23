@@ -3,6 +3,11 @@
   "name": "X抽出",
   "version": "1.0",
   "description": "X上のツイートをタップ選択してURLをコピー",
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
   "content_scripts": [
     {
       "matches": ["https://x.com/*", "https://twitter.com/*"],
