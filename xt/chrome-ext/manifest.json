@@ -1,12 +1,16 @@
 {
   "manifest_version": 3,
   "name": "X抽出",
-  "version": "1.0",
+  "version": "1.1",
   "description": "X上のツイートをタップ選択してURLをコピー",
   "icons": {
     "16": "icon16.png",
     "48": "icon48.png",
     "128": "icon128.png"
+  },
+  "action": {},
+  "background": {
+    "service_worker": "background.js"
   },
   "content_scripts": [
     {

@@ -3,6 +3,7 @@
 const selected = new Set();
 let bar = null;
 let lastUrl = location.href;
+let scanTimer = null;
 
 function getTweetUrl(article) {
   const timeLink = article.querySelector('a[href*="/status/"] time');
@@ -54,14 +55,23 @@ function setupArticle(article) {
 }
 
 function scanArticles() {
-  document.querySelectorAll("article").forEach(setupArticle);
-  // DOM再生成で xt-selected が消えたarticleを再ハイライト
   document.querySelectorAll("article").forEach((article) => {
+    setupArticle(article);
     const url = getTweetUrl(article);
-    if (url && selected.has(url)) {
+    if (url && selected.has(url) && !article.classList.contains("xt-selected")) {
       article.classList.add("xt-selected");
     }
   });
+}
+
+// デバウンス付きスキャン — DOM変更が連続しても300ms間隔に抑える
+function debouncedScan() {
+  if (scanTimer) return;
+  scanTimer = setTimeout(() => {
+    scanTimer = null;
+    scanArticles();
+    ensureBar();
+  }, 300);
 }
 
 // ビューポート内のarticleだけ返す
@@ -70,7 +80,6 @@ function getVisibleArticles() {
   const visible = [];
   for (const article of articles) {
     const rect = article.getBoundingClientRect();
-    // 画面内に少しでも見えていればOK
     if (rect.bottom > 0 && rect.top < window.innerHeight) {
       visible.push(article);
     }
@@ -119,29 +128,42 @@ async function copySelected() {
 
   try {
     await navigator.clipboard.writeText(urls.join("\n"));
-    const btn = document.querySelector(".xt-btn-copy");
-    if (btn) {
-      btn.textContent = `コピー済み (${urls.length}件)`;
-      btn.style.background = "#00875a";
-      setTimeout(() => {
-        btn.textContent = "コピー";
-        btn.style.background = "";
-      }, 2000);
-    }
+    showCopyFeedback(urls.length);
   } catch (e) {
-    const ta = document.createElement("textarea");
-    ta.value = urls.join("\n");
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand("copy");
-    ta.remove();
+    // フォールバック: execCommand
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = urls.join("\n");
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+      showCopyFeedback(urls.length);
+    } catch (e2) {
+      // 最終フォールバック: プロンプト表示
+      window.prompt("コピーに失敗しました。手動でコピーしてください:", urls.join("\n"));
+    }
   }
 }
 
-function initBar() {
-  bar = document.createElement("div");
-  bar.id = "xt-bar";
-  bar.innerHTML = `
+function showCopyFeedback(count) {
+  const btn = document.querySelector(".xt-btn-copy");
+  if (btn) {
+    btn.textContent = `コピー済み (${count}件)`;
+    btn.style.background = "#00875a";
+    setTimeout(() => {
+      btn.textContent = "コピー";
+      btn.style.background = "";
+    }, 2000);
+  }
+}
+
+function createBar() {
+  const b = document.createElement("div");
+  b.id = "xt-bar";
+  b.innerHTML = `
     <span id="xt-count">0</span><span>件選択</span>
     <button class="xt-btn-select" id="xt-sel-visible">表示中を選択</button>
     <button class="xt-btn-select xt-btn-recent" id="xt-sel-50">直近50件</button>
@@ -149,24 +171,41 @@ function initBar() {
     <button class="xt-btn-copy">コピー</button>
     <button class="xt-btn-close" id="xt-close">✕</button>
   `;
-  document.body.appendChild(bar);
 
-  bar.querySelector("#xt-sel-visible").addEventListener("click", selectVisible);
-  bar.querySelector("#xt-sel-50").addEventListener("click", selectRecent50);
-  bar.querySelector("#xt-desel").addEventListener("click", deselectAll);
-  bar.querySelector(".xt-btn-copy").addEventListener("click", copySelected);
-  bar.querySelector("#xt-close").addEventListener("click", () => {
+  b.querySelector("#xt-sel-visible").addEventListener("click", selectVisible);
+  b.querySelector("#xt-sel-50").addEventListener("click", selectRecent50);
+  b.querySelector("#xt-desel").addEventListener("click", deselectAll);
+  b.querySelector(".xt-btn-copy").addEventListener("click", copySelected);
+  b.querySelector("#xt-close").addEventListener("click", () => {
     deselectAll();
-    bar.classList.add("xt-hidden");
+    b.classList.add("xt-hidden");
     document.body.classList.add("xt-disabled");
   });
+
+  return b;
+}
+
+// バーがDOMに存在するか確認し、なければ再生成
+function ensureBar() {
+  if (document.body.classList.contains("xt-disabled")) return;
+
+  const existing = document.getElementById("xt-bar");
+  if (existing) {
+    bar = existing;
+    updateCount();
+    return;
+  }
+
+  // バーがDOMから消えた → 再生成
+  bar = createBar();
+  document.body.appendChild(bar);
+  updateCount();
 }
 
 // SPA ナビゲーション検知
 function onNavigate() {
-  // URL変更時にarticleを再スキャン（selectionは保持）
   scanArticles();
-  // バーが非表示でなければ表示を維持
+  ensureBar();
 }
 
 function checkUrlChange() {
@@ -176,23 +215,33 @@ function checkUrlChange() {
   }
 }
 
-// 初期化
-initBar();
-scanArticles();
+// --- 初期化 ---
+function init() {
+  bar = createBar();
+  document.body.appendChild(bar);
+  scanArticles();
+}
 
-// DOM変更を監視（Xがarticleを再生成するたびに復元）
-new MutationObserver(scanArticles).observe(document.body, {
+// bodyが準備できてから初期化（まれにcontent scriptが早すぎるケース対策）
+if (document.body) {
+  init();
+} else {
+  document.addEventListener("DOMContentLoaded", init);
+}
+
+// DOM変更を監視（デバウンス付き）
+new MutationObserver(debouncedScan).observe(document.body || document.documentElement, {
   childList: true,
   subtree: true,
 });
 
-// SPA navigation: popstate + polling (pushState doesn't fire popstate)
+// SPA navigation: popstate
 window.addEventListener("popstate", () => {
   lastUrl = location.href;
   onNavigate();
 });
 
-// Navigation API (Chrome 102+) for pushState/replaceState detection
+// Navigation API (Chrome 102+)
 if (typeof navigation !== "undefined") {
   navigation.addEventListener("navigate", () => {
     setTimeout(() => {
@@ -202,14 +251,42 @@ if (typeof navigation !== "undefined") {
   });
 }
 
-// スクロール時にも定期的に復元 + URL変更チェック
+// タブがアクティブに戻った時に復元チェック
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    ensureBar();
+    scanArticles();
+  }
+});
+
+// 拡張アイコンクリックでバーを再表示
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.action === "toggle-bar") {
+    const existing = document.getElementById("xt-bar");
+    if (existing && !existing.classList.contains("xt-hidden")) {
+      // 表示中 → 閉じる
+      deselectAll();
+      existing.classList.add("xt-hidden");
+      document.body.classList.add("xt-disabled");
+    } else {
+      // 非表示 → 再表示
+      document.body.classList.remove("xt-disabled");
+      if (existing) {
+        existing.classList.remove("xt-hidden");
+      } else {
+        bar = createBar();
+        document.body.appendChild(bar);
+      }
+      scanArticles();
+      updateCount();
+    }
+  }
+});
+
+// 定期チェック（URL変更 + バー存在確認 + 未セットアップarticle検出）
 setInterval(() => {
   checkUrlChange();
-  document.querySelectorAll("article").forEach((article) => {
-    const url = getTweetUrl(article);
-    if (url && selected.has(url) && !article.classList.contains("xt-selected")) {
-      article.classList.add("xt-selected");
-    }
-    if (!article.dataset.xtReady) setupArticle(article);
-  });
-}, 300);
+  ensureBar();
+  // 未セットアップのarticleだけ処理（軽量）
+  document.querySelectorAll("article:not([data-xt-ready])").forEach(setupArticle);
+}, 500);
