@@ -1,0 +1,3 @@
+#!/bin/bash
+SCRIPT_DIR="/Users/nn/tools/yt-summarizer"
+exec "$SCRIPT_DIR/.venv/bin/python3" "$SCRIPT_DIR/yt-summary.py" "$@"

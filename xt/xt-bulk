@@ -1,0 +1,24 @@
+#!/bin/bash
+# クリップボードのURLリストを一括で xt に流す
+# 使い方: xt-bulk  (ブックマークレットでコピー後に実行するだけ)
+
+URLS=$(pbpaste)
+
+if [ -z "$URLS" ]; then
+  echo "クリップボードが空です" >&2
+  exit 1
+fi
+
+# Count URLs
+COUNT=$(echo "$URLS" | grep -c "x.com\|twitter.com")
+if [ "$COUNT" -eq 0 ]; then
+  echo "クリップボードにX/TwitterのURLが見つかりません" >&2
+  echo "ブックマークレットを先に実行してください" >&2
+  exit 1
+fi
+
+echo "[$COUNT件のツイートを取得します]" >&2
+echo "" >&2
+
+# Pass all URLs as arguments to xt
+echo "$URLS" | tr '\n' '\0' | xargs -0 xt "$@"
